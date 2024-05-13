@@ -24,6 +24,9 @@ class Node:
     def add_child(self, key: NodeKey, left_child: Node, right_child: Node) -> None:
         raise NotImplementedError
 
+    def remove_value(self, key:NodeKey) -> None:
+        raise NotImplementedError
+
     def split_leaf(self) -> tuple[NodeKey, Node, Node]:
         raise NotImplementedError
 
@@ -32,6 +35,9 @@ class Node:
 
     def is_full(self) -> bool:
         return len(self.keys) == self.d
+
+    # def is_underflow(self) -> bool:
+    #     return len(self.keys) < self.d // 2
 
 
 class InternelNode(Node):
@@ -75,6 +81,8 @@ class InternelNode(Node):
 
 class LeafNode(Node):
     def __init__(self, d, parent) -> None:
+        self.prev: Optional[LeafNode] = None
+        self.next: Optional[LeafNode] = None
         self.values: list[LeafValue] = []
         super(LeafNode, self).__init__(d, parent, True)
 
@@ -102,6 +110,17 @@ class LeafNode(Node):
         self.keys.insert(ind, key)
         self.values.insert(ind, value)
 
+    # def remove_value(self, key:NodeKey) -> None:
+    #     ind = bisect_left(self.keys, key)
+    #     assert(self.keys[ind] == key)
+
+    #     self.keys.pop(ind)
+    #     self.values.pop(ind)
+
+    #     if self.parent:
+    #         pass
+
+
     def split_leaf(self):
         assert(self.is_full())
 
@@ -114,6 +133,13 @@ class LeafNode(Node):
 
         self.keys = self.keys[mid:]
         self.values = self.values[mid:]
+
+        # Link leaf nodes
+        if self.prev:
+            self.prev.next = left
+        left.prev = self.prev
+        left.next = self
+        self.prev = left
 
         return self.keys[0], left, self
 
@@ -163,6 +189,28 @@ class BPlusTree:
             key0, left, right = curr.split_leaf()
             _push_up(key0, left, right)
 
+    # def remove(self, key: NodeKey):
+    #     # Traverse until reaching the leaf node
+    #     curr = self.root
+    #     while not curr.leaf:
+    #         curr, _ = curr.get_child(key)
+
+    #     curr.remove_value(key)
+
+    #     if curr.is_underflow():
+
+    def leafwalk(self):
+        curr = self.root
+
+        while not curr.leaf:
+            curr = cast(InternelNode, curr)
+            curr = curr.children[0]
+
+        while curr:
+            curr = cast(LeafNode, curr)
+            for ind in range(0, len(curr.keys)):
+                yield (curr.keys[ind], curr.values[ind])
+            curr = curr.next
 
     def visualize(self):
         def _stringify(lst: list[Any]) -> list[str]:
