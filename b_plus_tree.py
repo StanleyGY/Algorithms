@@ -1,5 +1,6 @@
 from __future__ import annotations
-from typing import Any, Optional
+from typing import Any, Optional, cast
+from bisect import bisect_left, bisect_right
 
 NodeKey = Any
 LeafValue = Any
@@ -8,13 +9,76 @@ class Node:
     def __init__(self, d, parent, leaf) -> None:
         self.parent: Optional[Node] = parent
         self.keys: list[NodeKey] = []
-        self.children: list[Node] = []      # For internal nodes
-        self.values: list[LeafValue] = []   # For leaf nodes
         self.leaf: bool = leaf
         self.d: int = d
 
     def get_value(self, searching_key: NodeKey) -> Optional[LeafValue]:
-        assert(self.leaf)
+        raise NotImplementedError
+
+    def get_child(self, searching_key: NodeKey) -> tuple[Node, int]:
+        raise NotImplementedError
+
+    def add_value(self, key: NodeKey, value: LeafValue) -> None:
+        raise NotImplementedError
+
+    def add_child(self, key: NodeKey, left_child: Node, right_child: Node) -> None:
+        raise NotImplementedError
+
+    def split_leaf(self) -> tuple[NodeKey, Node, Node]:
+        raise NotImplementedError
+
+    def split_internal(self) -> tuple[NodeKey, Node, Node]:
+        raise NotImplementedError
+
+    def is_full(self) -> bool:
+        return len(self.keys) == self.d
+
+
+class InternelNode(Node):
+    def __init__(self, d, parent) -> None:
+        self.children: list[Node] = []
+        super(InternelNode, self).__init__(d, parent, False)
+
+    def get_child(self, searching_key: NodeKey) -> tuple[Node, int]:
+        ind = bisect_right(self.keys, searching_key)
+        return self.children[ind], ind
+
+    def add_child(self, key: NodeKey, left_child: Node, right_child: Node) -> None:
+        assert (len(self.keys) > 0)
+
+        ind = bisect_left(self.keys, key)
+
+        assert(ind >= len(self.keys) or self.keys[ind] != key)
+
+        self.keys.insert(ind, key)
+        self.children[ind] = left_child
+        self.children.insert(ind + 1, right_child)
+
+    def split_internal(self) -> tuple[NodeKey, Node, Node]:
+        assert(self.is_full())
+
+        mid = len(self.keys) // 2
+
+        left = InternelNode(d=self.d, parent=self.parent)
+        left.keys = self.keys[:mid]
+        left.children = self.children[:mid+1]
+
+        for c in left.children:
+            c.parent = left
+
+        key = self.keys[mid]
+        self.keys = self.keys[mid+1:]
+        self.children = self.children[mid+1:]
+
+        return key, left, self
+
+
+class LeafNode(Node):
+    def __init__(self, d, parent) -> None:
+        self.values: list[LeafValue] = []
+        super(LeafNode, self).__init__(d, parent, True)
+
+    def get_value(self, searching_key: NodeKey) -> Optional[LeafValue]:
         assert(len(self.keys) == len(self.values))
 
         for ind, key in enumerate(self.keys):
@@ -22,73 +86,29 @@ class Node:
                 return self.values[ind]
         return None
 
-    def get_child(self, searching_key: NodeKey) -> tuple[Node, int]:
-        assert(not self.leaf)
-
-        for ind, key in enumerate(self.keys):
-            if searching_key < key:
-                return self.children[ind], ind
-        return self.children[ind + 1], ind + 1
-
     def add_value(self, key: NodeKey, value: LeafValue) -> None:
-        assert(self.leaf)
-
         if not self.keys:
             self.keys.append(key)
             self.values.append(value)
             return
 
-        # Insert the key to maintain the sorted order
-        for ind in range(0, len(self.keys)):
-            if key == self.keys[ind]:
-                self.values[ind] = value
-                return
+        # Insert the key while keeping the array sorted
+        ind = bisect_left(self.keys, key)
 
-            if key < self.keys[ind] and (ind == 0 or self.keys[ind - 1] < key):
-                self.keys = self.keys[:ind] + [key] + self.keys[ind:]
-                self.values = self.values[:ind] + [value] + self.values[ind:]
-                return
+        # Check if there's a duplicate
+        if ind < len(self.keys) and self.keys[ind] == key:
+            return
 
-        self.keys.append(key)
-        self.values.append(value)
+        self.keys.insert(ind, key)
+        self.values.insert(ind, value)
 
-    def add_child(self, key: NodeKey, left_child: Node, right_child: Node) -> None:
-        if self.leaf:
-            raise Exception("Cannot add value to a child node")
-
-        '''
-              42
-           /      \\
-          []  [43 44 45 46]
-
-        becomes
-              42    45
-           /      \\    \\
-          []  [43 44] [45 46]
-        '''
-
-        assert (len(self.keys) > 0)
-
-        for ind in range(0, len(self.keys)):
-            assert (key != self.keys[ind])
-
-            if key < self.keys[ind]:
-                self.keys = self.keys[:ind] + [key] + self.keys[ind:]
-                self.children = self.children[:ind] + [left_child, right_child] + self.children[ind + 1:]
-                return
-
-        self.keys.append(key)
-        self.children = self.children[:-1] + [left_child, right_child]
-
-
-    def split_leaf(self) -> tuple[NodeKey, Node, Node]:
-        assert(self.leaf)
+    def split_leaf(self):
         assert(self.is_full())
 
         mid = len(self.keys) // 2
 
         # Split into two leaf nodes
-        left = Node(d=self.d, parent=self.parent, leaf=True)
+        left = LeafNode(d=self.d, parent=self.parent)
         left.keys = self.keys[:mid]
         left.values = self.values[:mid]
 
@@ -97,32 +117,9 @@ class Node:
 
         return self.keys[0], left, self
 
-    def split_internal(self) -> tuple[NodeKey, Node, Node]:
-        assert(not self.leaf)
-        assert(self.is_full())
-
-        mid = len(self.keys) // 2
-
-        left = Node(d=self.d, parent=self.parent, leaf=False)
-        left.keys = self.keys[:mid]
-        left.children = self.children[:mid+1]
-
-        for c in left.children:
-            c.parent = left
-
-        key = self.keys[mid]
-
-        self.keys = self.keys[mid+1:]
-        self.children = self.children[mid+1:]
-
-        return key, left, self
-
-    def is_full(self) -> bool:
-        return len(self.keys) == self.d
-
 class BPlusTree:
     def __init__(self, d) -> None:
-        self.root: Node = Node(d=d, parent=None, leaf=True)
+        self.root: Node = LeafNode(d=d, parent=None)
         self.d: int = d
 
     def get(self, key: NodeKey) -> Optional[LeafValue]:
@@ -144,7 +141,7 @@ class BPlusTree:
             parent = right.parent
 
             if not parent:
-                new_parent = Node(d=self.d, parent=None, leaf=False)
+                new_parent = InternelNode(d=self.d, parent=None)
                 new_parent.keys.append(key0)
                 new_parent.children.extend([left, right])
                 left.parent = right.parent = self.root = new_parent
@@ -176,8 +173,10 @@ class BPlusTree:
             print("[%s]" % (", ".join(_stringify(curr.keys))), end=(" " if curr.leaf else "\n"))
 
             if curr.leaf:
+                curr = cast(LeafNode, curr)
                 print("-> (%s)" % (", ".join(_stringify(curr.values))))
             else:
+                curr = cast(InternelNode, curr)
                 for i, c in enumerate(curr.children):
                     if i < len(curr.keys):
                         print("." * (level * 2 + 1), end=" ")

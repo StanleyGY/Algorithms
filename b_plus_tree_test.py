@@ -4,6 +4,7 @@ import random
 if __name__ == "__main__":
 
     print("==== Test: Insert and Get ====")
+
     MAXNUM = 100000
     d = random.randint(3, 10)
     print("d: %d" % (d))
